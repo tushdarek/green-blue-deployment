@@ -5,8 +5,8 @@ pipeline {
         REGION = 'eu-north-1'
         LISTENER_ARN = 'arn:aws:elasticloadbalancing:eu-north-1:098688552647:listener/app/blue-green/38707e768b5dfd29/985bab3a196613ae'
 
-        BLUE_TG = 'arn:aws:elasticloadbalancing:eu-north-1:098688552647:targetgroup/blue/xxxx'   // keep your original
-        GREEN_TG = 'arn:aws:elasticloadbalancing:eu-north-1:098688552647:targetgroup/green/xxxx' // keep your original
+        BLUE_TG = 'arn:aws:elasticloadbalancing:eu-north-1:098688552647:targetgroup/Blue-tg/9a66b16af68a0c18'   // keep your original
+        GREEN_TG = 'arn:aws:elasticloadbalancing:eu-north-1:098688552647:targetgroup/Green-TG/6c4c93c5e6d8a8f8'
 
         BLUE_IP = '16.171.133.4'
         GREEN_IP = '13.60.207.99 ' // keep your original
@@ -111,4 +111,4 @@ pipeline {
             echo "Deployment successful!"
         }
     }
-}
+
