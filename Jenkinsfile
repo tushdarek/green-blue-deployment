@@ -1,37 +1,62 @@
 pipeline {
     agent any
+
     environment {
-        // Target Groups
-        BLUE_TG = "arn:aws:elasticloadbalancing:eu-north-1:098688552647:targetgroup/Blue-tg/9a66b16af68a0c18"
-        GREEN_TG = "arn:aws:elasticloadbalancing:eu-north-1:098688552647:targetgroup/Green-TG/6c4c93c5e6d8a8f8"
+        BLUE_IP = "YOUR_BLUE_SERVER_IP"
+        GREEN_IP = "YOUR_GREEN_SERVER_IP"
 
-        // ALB Listener
-        ALB_LISTENER = "arn:aws:elasticloadbalancing:eu-north-1:098688552647:listener/app/blue-green/38707e768b5dfd29/985bab3a196613ae"
+        BLUE_TG = "arn:aws:elasticloadbalancing:eu-north-1:XXXX:targetgroup/Blue-TG/XXXX"
+        GREEN_TG = "arn:aws:elasticloadbalancing:eu-north-1:XXXX:targetgroup/Green-TG/XXXX"
 
-        // EC2 Instances
-        BLUE_INSTANCE = "16.171.133.4"
-        GREEN_INSTANCE = "13.60.207.99"
-
-        // Initial Active TG (Blue)
-        ACTIVE_TG = "${BLUE_TG}"
+        LISTENER_ARN = "arn:aws:elasticloadbalancing:eu-north-1:XXXX:listener/app/XXXX"
+        REGION = "eu-north-1"
     }
 
     stages {
+
+        stage('Checkout Code') {
+            steps {
+                git 'https://github.com/tushdarek/green-blue-deployment.git'
+            }
+        }
+
+        stage('Determine Active Environment') {
+            steps {
+                script {
+                    def currentTG = sh(
+                        script: """
+                        aws elbv2 describe-listeners \
+                        --listener-arn ${LISTENER_ARN} \
+                        --region ${REGION} \
+                        --query "Listeners[0].DefaultActions[0].TargetGroupArn" \
+                        --output text
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    if (currentTG == BLUE_TG) {
+                        env.INACTIVE_IP = GREEN_IP
+                        env.NEW_TG = GREEN_TG
+                        env.OLD_TG = BLUE_TG
+                        echo "Active: BLUE → Deploying to GREEN"
+                    } else {
+                        env.INACTIVE_IP = BLUE_IP
+                        env.NEW_TG = BLUE_TG
+                        env.OLD_TG = GREEN_TG
+                        echo "Active: GREEN → Deploying to BLUE"
+                    }
+                }
+            }
+        }
+
         stage('Deploy to Inactive') {
             steps {
                 script {
-                    // Determine inactive environment
-                    def inactiveTG = (ACTIVE_TG == BLUE_TG) ? GREEN_TG : BLUE_TG
-                    def inactiveIP = (inactiveTG == BLUE_TG) ? BLUE_INSTANCE : GREEN_INSTANCE
-
-                    echo "Deploying to inactive environment: ${inactiveTG} (${inactiveIP})"
-
-                    // Deploy code
-                    sh "scp -i ~/.ssh/bluekey.pem -o StrictHostKeyChecking=no index.html ubuntu@${inactiveIP}:/var/www/html/"
-
-                    // Save inactive TG for traffic switch
-                    env.INACTIVE_TG = inactiveTG
-                    env.INACTIVE_IP = inactiveIP
+                    sshagent(['blue-green-key']) {
+                        sh """
+                        scp -o StrictHostKeyChecking=no index.html ubuntu@${INACTIVE_IP}:/var/www/html/
+                        """
+                    }
                 }
             }
         }
@@ -39,10 +64,17 @@ pipeline {
         stage('Health Check') {
             steps {
                 script {
-                    def status = sh(script: "curl -f http://${env.INACTIVE_IP}", returnStatus: true)
-                    if (status != 0) {
+                    sleep 10
+                    def status = sh(
+                        script: "curl -s http://${INACTIVE_IP}",
+                        returnStdout: true
+                    )
+
+                    if (!status.contains("version") && !status.contains("blue-green")) {
                         error "Health check failed!"
                     }
+
+                    echo "Health check passed"
                 }
             }
         }
@@ -50,14 +82,13 @@ pipeline {
         stage('Switch Traffic') {
             steps {
                 script {
-                    sh """
-                        aws elbv2 modify-listener --listener-arn $ALB_LISTENER \
-                        --default-actions Type=forward,TargetGroupArn=$INACTIVE_TG
-                    """
-                    echo "Traffic switched to inactive environment"
-
-                    // Update ACTIVE_TG after successful switch
-                    env.ACTIVE_TG = env.INACTIVE_TG
+                    withAWS(credentials: 'aws-creds', region: REGION) {
+                        sh """
+                        aws elbv2 modify-listener \
+                        --listener-arn ${LISTENER_ARN} \
+                        --default-actions Type=forward,TargetGroupArn=${NEW_TG}
+                        """
+                    }
                 }
             }
         }
@@ -66,12 +97,20 @@ pipeline {
     post {
         failure {
             script {
-                echo "Rollback: Traffic revert to previous active TG ($ACTIVE_TG)"
-                sh """
-                    aws elbv2 modify-listener --listener-arn $ALB_LISTENER \
-                    --default-actions Type=forward,TargetGroupArn=$ACTIVE_TG
-                """
+                echo "Deployment failed! Rolling back..."
+
+                withAWS(credentials: 'aws-creds', region: REGION) {
+                    sh """
+                    aws elbv2 modify-listener \
+                    --listener-arn ${LISTENER_ARN} \
+                    --default-actions Type=forward,TargetGroupArn=${OLD_TG}
+                    """
+                }
             }
+        }
+
+        success {
+            echo "Deployment successful 🎉"
         }
     }
 }
