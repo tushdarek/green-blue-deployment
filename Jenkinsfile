@@ -18,7 +18,6 @@ pipeline {
             steps {
                 git branch: 'main', url: 'https://github.com/tushdarek/green-blue-deployment.git'
             }
-            }
         }
 
         stage('Determine Active Environment') {
@@ -111,4 +110,4 @@ pipeline {
             echo "Deployment successful!"
         }
     }
-
+}
