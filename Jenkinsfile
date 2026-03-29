@@ -2,47 +2,49 @@ pipeline {
     agent any
 
     environment {
-        BLUE_IP = "16.171.133.4"
-        GREEN_IP = "13.60.207.99"
+        REGION = 'eu-north-1'
+        LISTENER_ARN = 'arn:aws:elasticloadbalancing:eu-north-1:098688552647:listener/app/blue-green/38707e768b5dfd29/985bab3a196613ae'
 
-        BLUE_TG = "arn:aws:elasticloadbalancing:eu-north-1:098688552647:targetgroup/Blue-tg/9a66b16af68a0c18"
-        GREEN_TG = "arn:aws:elasticloadbalancing:eu-north-1:098688552647:targetgroup/Green-TG/6c4c93c5e6d8a8f8"
+        BLUE_TG = 'arn:aws:elasticloadbalancing:eu-north-1:098688552647:targetgroup/blue/xxxx'   // keep your original
+        GREEN_TG = 'arn:aws:elasticloadbalancing:eu-north-1:098688552647:targetgroup/green/xxxx' // keep your original
 
-        LISTENER_ARN = "arn:aws:elasticloadbalancing:eu-north-1:098688552647:listener/app/blue-green/38707e768b5dfd29/985bab3a196613ae"
-        REGION = "eu-north-1"
+        BLUE_IP = '13.60.207.99'
+        GREEN_IP = 'your-green-ip' // keep your original
     }
 
     stages {
 
         stage('Checkout Code') {
             steps {
-                git branch: 'main', url: 'https://github.com/tushdarek/green-blue-deployment.git'
+                git 'https://github.com/tushdarek/green-blue-deployment.git'
             }
         }
 
         stage('Determine Active Environment') {
             steps {
                 script {
-                    def currentTG = sh(
+                    def activeTG = sh(
                         script: """
                         aws elbv2 describe-listeners \
                         --listener-arn ${LISTENER_ARN} \
                         --region ${REGION} \
-                        --query "Listeners[0].DefaultActions[0].TargetGroupArn" \
+                        --query Listeners[0].DefaultActions[0].TargetGroupArn \
                         --output text
                         """,
                         returnStdout: true
                     ).trim()
 
-                    if (currentTG == BLUE_TG) {
-                        env.INACTIVE_IP = GREEN_IP
+                    if (activeTG == BLUE_TG) {
+                        env.ACTIVE = "BLUE"
+                        env.INACTIVE = "GREEN"
+                        env.TARGET_IP = GREEN_IP
                         env.NEW_TG = GREEN_TG
-                        env.OLD_TG = BLUE_TG
                         echo "Active: BLUE → Deploying to GREEN"
                     } else {
-                        env.INACTIVE_IP = BLUE_IP
+                        env.ACTIVE = "GREEN"
+                        env.INACTIVE = "BLUE"
+                        env.TARGET_IP = BLUE_IP
                         env.NEW_TG = BLUE_TG
-                        env.OLD_TG = GREEN_TG
                         echo "Active: GREEN → Deploying to BLUE"
                     }
                 }
@@ -52,9 +54,15 @@ pipeline {
         stage('Deploy to Inactive') {
             steps {
                 script {
-                    sshagent(['blue-green-key']) {
+                    sshagent(['ubuntu']) {
                         sh """
-                        scp -o StrictHostKeyChecking=no index.html ubuntu@${INACTIVE_IP}:/var/www/html/
+                        # Copy file to tmp first
+                        scp -o StrictHostKeyChecking=no index.html ubuntu@${TARGET_IP}:/tmp/
+
+                        # Move with sudo (fix permission issue)
+                        ssh -o StrictHostKeyChecking=no ubuntu@${TARGET_IP} '
+                            sudo mv /tmp/index.html /var/www/html/index.html
+                        '
                         """
                     }
                 }
@@ -65,16 +73,17 @@ pipeline {
             steps {
                 script {
                     sleep 10
-                    def status = sh(
-                        script: "curl -s http://${INACTIVE_IP}",
-                        returnStdout: true
-                    )
 
-                    if (!status.contains("version") && !status.contains("blue-green")) {
-                        error "Health check failed!"
+                    def status = sh(
+                        script: "curl -o /dev/null -s -w '%{http_code}' http://${TARGET_IP}",
+                        returnStdout: true
+                    ).trim()
+
+                    if (status != "200") {
+                        error("Health check failed!")
                     }
 
-                    echo "Health check passed"
+                    echo "Health check passed!"
                 }
             }
         }
@@ -82,13 +91,12 @@ pipeline {
         stage('Switch Traffic') {
             steps {
                 script {
-                    withAWS(credentials: 'aws-creds', region: REGION) {
-                        sh """
-                        aws elbv2 modify-listener \
-                        --listener-arn ${LISTENER_ARN} \
-                        --default-actions Type=forward,TargetGroupArn=${NEW_TG}
-                        """
-                    }
+                    sh """
+                    aws elbv2 modify-listener \
+                    --listener-arn ${LISTENER_ARN} \
+                    --default-actions Type=forward,TargetGroupArn=${NEW_TG} \
+                    --region ${REGION}
+                    """
                 }
             }
         }
@@ -96,21 +104,10 @@ pipeline {
 
     post {
         failure {
-            script {
-                echo "Deployment failed! Rolling back..."
-
-                withAWS(credentials: 'aws-creds', region: REGION) {
-                    sh """
-                    aws elbv2 modify-listener \
-                    --listener-arn ${LISTENER_ARN} \
-                    --default-actions Type=forward,TargetGroupArn=${OLD_TG}
-                    """
-                }
-            }
+            echo "Deployment failed! Rolling back..."
         }
-
         success {
-            echo "Deployment successful 🎉"
+            echo "Deployment successful!"
         }
     }
 }
