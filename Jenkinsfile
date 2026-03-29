@@ -8,15 +8,16 @@ pipeline {
         BLUE_TG = 'arn:aws:elasticloadbalancing:eu-north-1:098688552647:targetgroup/blue/xxxx'   // keep your original
         GREEN_TG = 'arn:aws:elasticloadbalancing:eu-north-1:098688552647:targetgroup/green/xxxx' // keep your original
 
-        BLUE_IP = '13.60.207.99'
-        GREEN_IP = 'your-green-ip' // keep your original
+        BLUE_IP = '16.171.133.4'
+        GREEN_IP = '13.60.207.99 ' // keep your original
     }
 
     stages {
 
         stage('Checkout Code') {
             steps {
-                git 'https://github.com/tushdarek/green-blue-deployment.git'
+                git branch: 'main', url: 'https://github.com/tushdarek/green-blue-deployment.git'
+            }
             }
         }
 
