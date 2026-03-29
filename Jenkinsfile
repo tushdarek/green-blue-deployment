@@ -5,10 +5,10 @@ pipeline {
         BLUE_IP = "YOUR_BLUE_SERVER_IP"
         GREEN_IP = "YOUR_GREEN_SERVER_IP"
 
-        BLUE_TG = "arn:aws:elasticloadbalancing:eu-north-1:XXXX:targetgroup/Blue-TG/XXXX"
-        GREEN_TG = "arn:aws:elasticloadbalancing:eu-north-1:XXXX:targetgroup/Green-TG/XXXX"
+        BLUE_TG = "arn:aws:elasticloadbalancing:eu-north-1:098688552647:targetgroup/Blue-tg/9a66b16af68a0c18"
+        GREEN_TG = "arn:aws:elasticloadbalancing:eu-north-1:098688552647:targetgroup/Green-TG/6c4c93c5e6d8a8f8"
 
-        LISTENER_ARN = "arn:aws:elasticloadbalancing:eu-north-1:XXXX:listener/app/XXXX"
+        LISTENER_ARN = "arn:aws:elasticloadbalancing:eu-north-1:098688552647:listener/app/blue-green/38707e768b5dfd29/985bab3a196613ae"
         REGION = "eu-north-1"
     }
 
@@ -16,7 +16,7 @@ pipeline {
 
         stage('Checkout Code') {
             steps {
-                git 'https://github.com/tushdarek/green-blue-deployment.git'
+                git branch: 'main', url: 'https://github.com/tushdarek/green-blue-deployment.git'
             }
         }
 
