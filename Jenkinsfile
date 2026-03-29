@@ -9,7 +9,7 @@ pipeline {
         GREEN_TG = 'arn:aws:elasticloadbalancing:eu-north-1:098688552647:targetgroup/Green-TG/6c4c93c5e6d8a8f8'
 
         BLUE_IP = '16.171.133.4'
-        GREEN_IP = '13.60.207.99 ' // keep your original
+        GREEN_IP = '13.60.207.99' // keep your original
     }
 
     stages {
