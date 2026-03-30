@@ -2,121 +2,142 @@
 
 ## Architecture
 
-![](./img/Blue-Green%20deployment%20with%20Jenkins%20pipeline.png)
+![Blue-Green Deployment Architecture](./img/architecure.png)
 
 ## Overview
 
-This project implements a **Blue-Green Deployment** for aapplication to achieve **zero-downtime deployments**.  
+This project implements a **Blue-Green Deployment** for an application to achieve **zero-downtime deployments**.  
 It uses **Jenkins** for CI/CD and an **AWS Application Load Balancer (ALB)** to switch traffic between environments.
-
 
 ## Features
 
 - Pulls code from GitHub
-- Deploys to inactive environment (Blue or Green)
-- Performs health check
-- Switches ALB traffic automatically
-- Rollback if deployment fails
+- Deploys to the inactive environment (Blue or Green)
+- Performs health checks on the new deployment
+- Switches ALB traffic automatically upon successful health check
+- Rolls back automatically if deployment fails
 
 ## How It Works
 
 1. Jenkins pulls the latest code from GitHub.
-2. Deploys the new version to the inactive environment.
-3. Runs health checks.
-4. If successful, switches traffic via ALB to the new environment.
-5. If health check fails, rollback to previous environment.
+2. Determines which environment (Blue or Green) is currently inactive.
+3. Deploys the new version to the inactive environment.
+4. Runs health checks against the newly deployed environment.
+5. If successful, switches ALB traffic to the new environment.
+6. If health check fails, traffic remains on the current active environment (rollback).
 
+---
 
-### first created two servers
-1. green deployment
-2. blue deployment
+## Step 1: Create Two Servers
 
-![](./img/project2-server.png)
+Two EC2 instances were provisioned — one for the **Blue** environment and one for the **Green** environment. Dependencies (e.g., Apache/Nginx) were installed on both servers.
 
-installed dependencies on both servers
+**Blue server (Version 1):**
 
-![](./img/project2-webserver.png)
+![Blue Server - Version 1](./img/blue-server-version-1.png)
 
-### Step 2: Configure AWS ALB
+**Green server (Version 1 — before pipeline run):**
+
+![Green Server - Version 1](./img/green-server-version-1.png)
+
+---
+
+## Step 2: Configure AWS ALB
+
 - Create an **Application Load Balancer (ALB)**.
 - Create **two target groups**:
-  - `Blue-Target-Group` → points to the Blue server
-  - `Green-Target-Group` → points to the Green server
+  - `Blue-tg` → points to the Blue EC2 instance
+  - `Green-TG` → points to the Green EC2 instance
 - Configure **health checks** for both target groups.
-- Set the ALB to route traffic to the currently active server.
+- Set the ALB listener to initially route 100% of traffic to the Blue target group.
 
-![](./img/project2-TC.png)
+**ALB details:**
 
-![](./img/project2-TG.png)
+![ALB Details](./img/blue-green-alb.png)
 
-### Step 3 launch a jenkins server
+**Blue Target Group:**
 
-![](./img/project2-loginjenkins.png)
+![Blue Target Group](./img/blue-tg.png)
 
-- Install Jenkins plugins: Git, Pipeline, ssh agent
-- install cli in jenkins server
-- stored blue & green server (private key) credentials on Jenkins.
+**Green Target Group:**
 
-![](./img/project2-plugin.png)
+![Green Target Group](./img/green-tg.png)
 
-## step 4 pushed all required files on github 
+**ALB listener — Blue active (before pipeline run):**
 
-index.html
-jenkinsfile       
-
-![](./img/project2-githubcode.png)
-
-![](./img/project2githubpush.png)
+![ALB Listener - Blue Active](./img/alb-listerner-group-activer-server-blue-before-pipeline-run.png)
 
 
-### Step 5: Set Up Jenkins Pipeline
+---
 
-![](./img/project2-deploycode.png)
+## Step 3: Launch a Jenkins Server
 
-Jenkins Pipeline Logic
-1. **Pull Code from GitHub**
-   - Jenkins fetches the latest code from the repository.
-2. **Determine Inactive Server**
-   - Check which server (Blue or Green) is currently inactive.
-3. **Deploy to Inactive Server**
-   - Deploy the new application version to the inactive server.
-4. **Health Check**
-   - Verify that the new deployment is running correctly.
-5. **Switch Traffic via ALB**
-   - If health check passes, switch ALB traffic to the new server.
-6. **Rollback (if needed)**
+- Launch a dedicated EC2 instance for Jenkins.
+- Install Jenkins and the following plugins: **Git**, **Pipeline**, **SSH Agent**.
+- Install the AWS CLI on the Jenkins server.
+- Store the Blue and Green servers' private SSH keys as credentials in Jenkins.
 
-   - If health check fails, traffic stays on the current active server.
+**Successful Jenkins build (#14):**
 
-![](./img/project2-jobsucces.png)   
+![Jenkins Build](./img/jenkins-build.png)
 
+---
+
+## Step 4: Push Required Files to GitHub
+
+The following files were committed and pushed to the GitHub repository:
+
+- `index.html` — the application page
+- `Jenkinsfile` — the pipeline definition
+
+---
+
+## Step 5: Set Up Jenkins Pipeline
+
+### Jenkins Pipeline Logic
+
+1. **Pull Code from GitHub** — Jenkins fetches the latest code from the repository.
+2. **Determine Inactive Server** — Checks which server (Blue or Green) is currently inactive by querying the ALB listener rule.
+3. **Deploy to Inactive Server** — Copies the new `index.html` to the inactive server via SSH.
+4. **Health Check** — Sends an HTTP request to the inactive server and verifies a `200 OK` response.
+5. **Switch Traffic via ALB** — If the health check passes, updates the ALB listener rule to forward 100% of traffic to the newly deployed environment.
+6. **Rollback (if needed)** — If the health check fails, the ALB listener rule is left unchanged and traffic continues to the stable environment.
+
+---
+
+## Results
+
+### Before Pipeline Run — Blue Active (100%)
+
+The ALB listener forwards all traffic to `blue-tg` (100%) and none to `Green-TG` (0%).
+
+![ALB Listener Before Pipeline - Blue Active](./img/alb-listerner-group-activer-server-blue-before-pipeline-run.png)
+
+### After Pipeline Run — Green Active (100%)
+
+After the pipeline successfully deployed Version 2 to the Green server and passed health checks, the ALB listener was updated to forward 100% of traffic to `Green-TG`.
+
+![ALB Listener After Pipeline - Green Active](./img/alb-listerner-group-activer-server-green-after-pipeline-run.png)
+
+### ALB DNS Output After Pipeline
+
+![ALB DNS Output After Pipeline](./img/al-dns-ouput-after-pipeline.png)
+
+### Application Version 2 Live on Green Server
+
+![Green Server - Version 2](./img/green-server-version-2.png)
+
+---
 
 ## Benefits
 
-- Zero-downtime deployments
-- Reduced deployment risk
-- Quick rollback capability
-- Fully automated CI/CD pipeline
+- **Zero-downtime deployments** — traffic switches instantly with no service interruption
+- **Reduced deployment risk** — new version is tested before receiving live traffic
+- **Quick rollback** — if health check fails, the stable environment remains active automatically
+- **Fully automated CI/CD** — the entire deploy → health check → switch flow runs without manual intervention
 
+---
 
-## output 
-
-![](./img/project2-DNS.png)
-
-![](./img/project2-blueTGH.png)
-
-## target group switching after new deployment
-
-![](./img/project2-2ndversion.png)
-
-![](./img/project2-greenTGH.png)
-
-
-Conclusion
+## Conclusion
 
 Implementing a Blue-Green Deployment pipeline with Jenkins and AWS Application Load Balancer ensures zero-downtime releases and improves the reliability of production deployments. By automatically deploying to an inactive environment, performing health checks, and switching traffic only when the deployment is verified, the system significantly reduces the risk of service disruptions.
-
-
-
-
-
